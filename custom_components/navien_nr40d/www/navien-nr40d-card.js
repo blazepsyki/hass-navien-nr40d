@@ -4,10 +4,14 @@ const CARD_TYPE = "navien-nr40d-card";
 const STRINGS = {
   en: {
     title: "Navien",
+    description: "Navien NR-40D boiler card",
+    field_device: "Device",
+    field_name: "Name",
     room: "Room",
     target: "Target",
     on: "On",
     off: "Off",
+    off_status: "Off",
     away: "Away",
     mode_room: "Room",
     mode_water: "Water",
@@ -39,12 +43,57 @@ const STRINGS = {
     tip_water: "Radiator water temperature, used in the water mode",
     tip_dhw: "Tap hot water temperature",
   },
+  ko: {
+    title: "나비엔",
+    description: "나비엔 NR-40D 보일러 카드",
+    field_device: "기기",
+    field_name: "이름",
+    room: "실내 온도",
+    target: "설정 온도",
+    on: "켜기",
+    off: "끄기",
+    off_status: "난방 꺼짐",
+    away: "외출",
+    mode_room: "실내",
+    mode_water: "온돌",
+    water: "난방수",
+    dhw: "온수",
+    heating: "난방 중",
+    idle: "대기 중",
+    offline: "조절기 연결이 끊겼습니다",
+    pick: "Navien NR-40D 기기를 선택하세요",
+    missing: "보일러 엔티티를 찾을 수 없습니다",
+    tip_link_on: "조절기가 연결되어 있습니다",
+    tip_link_off: "조절기가 연결되어 있지 않습니다",
+    tip_flame_on: "버너가 작동 중입니다",
+    tip_flame_off: "버너가 꺼져 있습니다",
+    tip_outdoor_on: "실외 온도 센서가 보일러에 연결되어 있습니다",
+    tip_outdoor_off: "실외 온도 센서가 감지되지 않았습니다",
+    tip_away_on: "외출 모드가 켜져 있습니다",
+    tip_error_ok: "오류 없음",
+    tip_error: "보일러 오류",
+    tip_room: "조절기 센서에서 측정한 실내 온도입니다",
+    tip_target: "실내 온도가 설정 온도보다 낮으면 보일러가 난방합니다",
+    tip_minus: "설정 온도를 1° 낮춥니다",
+    tip_plus: "설정 온도를 1° 높입니다",
+    tip_off: "난방을 끕니다",
+    tip_on: "난방을 켭니다",
+    tip_away: "외출 중 사용하는 절약 모드입니다",
+    tip_mode_room: "실내 온도를 기준으로 난방합니다",
+    tip_mode_water: "난방수 온도를 기준으로 난방합니다",
+    tip_water: "온돌 모드에서 사용하는 난방수 온도입니다",
+    tip_dhw: "수도에서 나오는 온수의 온도입니다",
+  },
   ru: {
     title: "Navien",
+    description: "Карточка котла Navien NR-40D",
+    field_device: "Устройство",
+    field_name: "Имя",
     room: "Комната",
     target: "Уставка",
     on: "Вкл",
     off: "Выкл",
+    off_status: "Выкл",
     away: "Вне дома",
     mode_room: "По комнате",
     mode_water: "По теплоносителю",
@@ -409,8 +458,9 @@ input[type=range]::-moz-range-track { background: transparent; }
 `;
 
 function lang(hass) {
-  const code = (hass && (hass.locale?.language || hass.language) || "en").toLowerCase();
-  return code.startsWith("ru") ? "ru" : "en";
+  const code = (hass?.locale?.language || hass?.language || document.documentElement.lang || "en").toLowerCase();
+  const language = code.split(/[-_]/, 1)[0];
+  return Object.hasOwn(STRINGS, language) ? language : "en";
 }
 
 function t(hass, key) {
@@ -566,6 +616,7 @@ class NavienNr40dCard extends HTMLElement {
         },
         { name: "name", selector: { text: {} } },
       ],
+      computeLabel: ({ name }) => t(null, `field_${name}`),
     };
   }
 
@@ -643,8 +694,16 @@ class NavienNr40dCard extends HTMLElement {
     const root = this.shadowRoot;
     if (!root) return;
     const ids = this._entities();
+    const error = hass?.states?.[ids.error];
+    const errorState = error?.state;
+    const errorText = errorState && !OK_ERRORS.includes(String(errorState).trim().toLowerCase())
+      ? hass.formatEntityState?.(error)
+        || hass.localize?.(`component.navien_nr40d.entity.sensor.error.state.${errorState}`)
+        || errorState
+      : null;
     const signature = JSON.stringify([
       lang(hass),
+      errorText,
       this._config,
       Object.values(ids).map((id) => {
         const state = hass?.states?.[id];
@@ -668,7 +727,6 @@ class NavienNr40dCard extends HTMLElement {
     const mode = st("mode");
     const modeSensor = st("mode_sensor");
     const away = st("away");
-    const error = st("error");
     const deviceId = normalizeDeviceId(this._config.device);
     const deviceName = hass?.devices?.[deviceId]?.name_by_user || hass?.devices?.[deviceId]?.name;
     const name = this._config.name || deviceName || climate?.attributes?.friendly_name || t(hass, "title");
@@ -686,15 +744,11 @@ class NavienNr40dCard extends HTMLElement {
     const heatOn = climate?.state === "heat" || power?.state === "on"
       || ["on", "room", "water", "away", "heat"].includes(modeValue);
     const awayOn = away?.state === "on" || climate?.attributes?.preset_mode === "away" || modeValue === "away";
-    const errorText =
-      error && error.state && !OK_ERRORS.includes(String(error.state).trim().toLowerCase())
-        ? error.state
-        : null;
     const ready = Boolean(climate || room || roomTarget || water || dhw || mode || power || away);
     const hasDevice = Boolean(deviceId || this._config.entity);
     const canSetRoom = Boolean(ids.climate || ids.room_target);
     const canPower = Boolean(ids.climate || ids.power);
-    const subtitle = !heatOn ? t(hass, "off") : burning ? t(hass, "heating") : t(hass, "idle");
+    const subtitle = !heatOn ? t(hass, "off_status") : burning ? t(hass, "heating") : t(hass, "idle");
     const tip = (key) => this._escape(t(hass, key));
 
     const badges = [
@@ -874,7 +928,9 @@ if (!window.customCards.some((card) => card.type === CARD_TYPE)) {
   window.customCards.push({
     type: CARD_TYPE,
     name: "Navien NR-40D",
-    description: "Navien NR-40D boiler card",
+    get description() {
+      return t(null, "description");
+    },
     preview: false,
   });
 }
